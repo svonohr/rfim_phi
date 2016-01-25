@@ -37,7 +37,7 @@ void philox2x32_mic(uint64_t counter, uint32_t key, __m512i& rnd1, __m512i& rnd2
   __m512i l = _mm512_set1_epi32(counter >> 32);
   __m512i keyV = _mm512_set1_epi32(key);
   keyV = _mm512_add_epi32(keyV, incr);
-  
+
   #pragma unroll(10)
   for(int i = 0; i < 10; ++i)
   {
@@ -78,7 +78,7 @@ void spinFlipCore(uint32_t* updated, const uint32_t* neighbours, const uint32_t*
   n[3] = _mm512_load_epi32(neighbours + z*N*N + y1*N + x);
   n[4] = _mm512_load_epi32(neighbours + z0*N*N + y*N + x);
   n[5] = _mm512_load_epi32(neighbours + z1*N*N + y*N + x);
-  
+
   // bits are set if spins are antiparallel
   unsigned int i = z*N*N + y*N + x;
   Iu32vec16 current = _mm512_load_epi32(updated + i);
@@ -91,15 +91,15 @@ void spinFlipCore(uint32_t* updated, const uint32_t* neighbours, const uint32_t*
 
   c0 = n[0] ^ n[1];
   c1 = n[0] & n[1];
-  
+
   c0 ^= n[2];
   c1 |= andn(c0, n[2]);
-  
+
   c0 ^= n[3];
   carry = andn(c0, n[3]);
   c1 ^= carry;
   c2 = andn(c1, carry);
-  
+
   c0 ^= n[4];
   carry = andn(c0, n[4]);
   c1 ^= carry;
@@ -109,14 +109,14 @@ void spinFlipCore(uint32_t* updated, const uint32_t* neighbours, const uint32_t*
   carry = andn(c0, n[5]);
   c1 ^= carry;
   c2 |= andn(c1, carry);
-  
+
   Iu32vec16 w1 = andn(c2, andn(c1, c0));
   Iu32vec16 w2 = andn(c2, andn(c0, c1));
   Iu32vec16 w3 = andn(c2, c0 & c1);
   Iu32vec16 w4 = andn(c0, andn(c1, c2));
   Iu32vec16 w5 = andn(c1, c0 & c2);
   Iu32vec16 w6 = andn(c0, c1 & c2);
-  
+
   // relation to field
   Iu32vec16 e[7];
   Iu32vec16 f = current ^ _mm512_load_epi32(field + i);
@@ -182,13 +182,13 @@ void setParameters(float temperature, float h)
   {
     float expBetaP = exp(-2*beta*(i-6+h));
     float expBetaM = exp(-2*beta*(i-6-h));
-    
+
     // Convert to int
     if(expBetaP >= 1)
       expBeta[i] = UINT32_MAX;
     else
       expBeta[i] = expBetaP*UINT32_MAX;
-      
+
     if(expBetaM >= 1)
       expBeta[i+1] = UINT32_MAX;
     else
@@ -203,6 +203,8 @@ double get_cputime()
   return tp.tv_sec + tp.tv_nsec*1E-9;
 }
 
+// Alignment and offset of memory storing the system and random field
+// See https://software.intel.com/en-us/forums/intel-many-integrated-core/topic/540363 for discussion
 const unsigned int ALIGN = 16*1024*1024;
 const unsigned int OFFSET = 32*1024;
 
@@ -282,7 +284,7 @@ int main(int argc, char** argv)
     uint32_t* field0 = system1 + N*N*N + OFFSET/4;
     uint32_t* field1 = field0 + N*N*N + OFFSET/4;
     setParameters(temperature, field);
-  
+
     randomize(system0, seed++);
     randomize(system1, seed++);
     randomize(field0, seed++);
@@ -297,7 +299,7 @@ int main(int argc, char** argv)
   // Set precision
   std::cout.precision(2);
   std::cout << std::fixed;
-  
+
   // Start simulation
   times.insert(0);
   auto prev = times.begin();
@@ -308,7 +310,7 @@ int main(int argc, char** argv)
     // Necessary steps for next system
     uint64_t steps = *it - *prev;
     prev = it;
-    
+
     // Do steps
     #pragma offload target(mic:phi_card)        \
       out(systemState : length(2*N*N*N) REUSE)  \
@@ -323,7 +325,7 @@ int main(int argc, char** argv)
         spinFlip(system0, system1, field0, seed++);
         spinFlip(system1, system0, field1, seed++);
       }
-      
+
       // Rearrange system for output
       for(unsigned int z = 0; z < N; z++)
       for(unsigned int y = 0; y < N; y++)
@@ -341,21 +343,21 @@ int main(int argc, char** argv)
         }
       }
     }
-    
+
     // Write out system
     mgr.SaveSystem(*it, reinterpret_cast<const char*>(systemState), system_size);
-    
+
     // Statistics
     std::cout << "\r" << *it * 100.f/maxTime << "% finished" << std::flush;
   }
-  
+
   double stopTime = get_cputime();
   double delta = stopTime-startTime;
   double timePerSpin = delta/64/N/N/N/maxTime;
   std::cout << "\r" << 100.0 << "% finished" << std::endl;
   std::cout << "Elapsed time: " << delta << std::endl;
   std::cout << "Time per spin: " << timePerSpin*1E12 << " ps" << std::endl;
-  
+
   // Free memory
   #pragma offload target(mic:phi_card)       \
     out(systemState : length(2*N*N*N) FREE)  \
